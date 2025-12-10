@@ -7,9 +7,25 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // --- Configurações do PixGG (Token fornecido) ---
-const PIXGG_AUTH_TOKEN = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImR1emFxQGxpdmUuY29tIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy91c2VyZGF0YSI6IntcIk5hbWVcIjpcIkZhYmlvIGRhIFNpbHZhIFNvdXphXCIsXCJFbWFpbFwiOlwiZHV6YXFAbGl2ZS5jb21cIixcIlJvbGVcIjpudWxsLFwiSWRcIjo3MDM0OH0iLCJyb2xlIjoiU3RyZWFtZXIiLCJuYmYiOjE3NjEzMzUxMTUsImV4cCI6MTc2MzkyNzExNSwiaWF0IjoxNzYxMzM1MTE1fQ.tvgaBqnyruz046LcMQWrmRgHQFfjcM0StEm8sasSCEk';
+const PIXGG_AUTH_TOKEN = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImR1emFxQGxpdmUuY29tIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy91c2VyZGF0YSI6IntcIk5hbWVcIjpcIkZhYmlvIGRhIFNpbHZhIFNvdXphXCIsXCJFbWFpbFwiOlwiZHV6YXFAbGljZS5jb21cIixcIlJvbGVcIjpudWxsLFwiSWRcIjo3MDM0OH0iLCJyb2xlIjoiU3RyZWFtZXIiLCJuYmYiOjE3NjEzMzUxMTUsImV4cCI6MTc2MzkyNzExNSwiaWF0IjoxNzYxMzM1MTE1fQ.tvgaBqnyruz046LcMQWrmRgHQFfjcM0StEm8sasSCEk';
 const PIXGG_API_URL = 'https://app.pixgg.com/checkouts';
 const STREAMER_ID = 70348;
+
+// --- Lista de Nomes Aleatórios ---
+const randomNames = [
+    "Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Heidi", "Ivan", "Judy",
+    "Kevin", "Liam", "Mia", "Noah", "Olivia", "Peter", "Quinn", "Rachel", "Sam", "Tina",
+    "Uma", "Victor", "Wendy", "Xavier", "Yara", "Zack", "Brenda", "Caleb", "Diana", "Ethan"
+];
+
+function getRandomName() {
+    return randomNames[Math.floor(Math.random() * randomNames.length)];
+}
+
+function generateRandomGVMessage() {
+    const randomNumber = Math.floor(10000000 + Math.random() * 90000000); // 8-digit random number
+    return `GV${randomNumber}`;
+}
 
 // --- Funções Auxiliares (User Agent e Security Headers) ---
 
@@ -96,7 +112,15 @@ async function generatePixGgCharge(payload) {
 // --- Rotas Express ---
 
 app.get('/', (req, res) => {
-    res.send('<h1>Servidor PixGG Ativo</h1><p>Acesse <a href="/pix/10.90">/pix/10.90</a> para testar.</p>');
+    res.json({
+        status: 'ok',
+        message: 'Servidor PixGG Ativo',
+        test_endpoint: '/pix/10.90'
+    });
+});
+
+app.get('/pix/', (req, res) => {
+    res.redirect('/');
 });
 
 app.get('/pix/:valor', async (req, res) => {
@@ -113,8 +137,8 @@ app.get('/pix/:valor', async (req, res) => {
     try {
         // 1. Gera a cobrança na API
         const result = await generatePixGgCharge({
-            donatorNickname: "Visitante",
-            donatorMessage: "Pagamento Teste Node",
+            donatorNickname: getRandomName(), // Usando nome aleatório
+            donatorMessage: generateRandomGVMessage(), // Usando mensagem aleatória GV
             donatorAmount: valor
         });
 
@@ -142,6 +166,26 @@ app.get('/pix/:valor', async (req, res) => {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Pagamento PixGG</title>
+
+            <!-- Favicon (ícone de QR Code simples) -->
+            <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 0h4v4H0zm6 0h4v4H6zm6 0h4v4h-4zM0 6h4v4H0zm6 6h4v4H6zM0 12h4v4H0zm6-6h4v4H6zm6 0h4v4h-4zm-6 6h4v4H6zm6 6h4v4h-4z'/%3E%3C/svg%3E" type="image/svg+xml">
+
+            <!-- Meta Tags para SEO e Redes Sociais (Open Graph, Twitter, etc.) -->
+            <meta name="description" content="Realize o pagamento de R$ ${valor.toFixed(2).replace('.', ',')} via Pix de forma rápida e segura.">
+            
+            <!-- Open Graph / Facebook / WhatsApp / Instagram -->
+            <meta property="og:title" content="Pagamento Pix: R$ ${valor.toFixed(2).replace('.', ',')}">
+            <meta property="og:description" content="Escaneie o QR Code ou copie o código para pagar R$ ${valor.toFixed(2).replace('.', ',')} via Pix.">
+            <meta property="og:image" content="${qrCodeDataURL}">
+            <meta property="og:url" content="http://localhost:${PORT}/pix/${valor}">
+            <meta property="og:type" content="website">
+
+            <!-- Twitter -->
+            <meta name="twitter:card" content="summary_large_image">
+            <meta name="twitter:title" content="Pagamento Pix: R$ ${valor.toFixed(2).replace('.', ',')}">
+            <meta name="twitter:description" content="Escaneie o QR Code ou copie o código para pagar R$ ${valor.toFixed(2).replace('.', ',')} via Pix.">
+            <meta name="twitter:image" content="${qrCodeDataURL}">
+
             <style>
                 body {
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
