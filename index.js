@@ -2,9 +2,16 @@ require('dotenv').config();
 const express = require('express');
 const QRCode = require('qrcode'); // Necessário: npm install qrcode
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const fs = require('fs').promises;
+const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// --- Configurações do Encurtador de Links ---
+const PEDIDOS_FILE = path.join(__dirname, 'pedidos.json');
+const CHECKOUT_BASE_URL = 'https://checkout.infinitepay.io/gvfacil';
 
 // --- Configurações do PixGG (Token fornecido) ---
 const PIXGG_AUTH_TOKEN = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImR1emFxQGxpdmUuY29tIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy91c2VyZGF0YSI6IntcIk5hbWVcIjpcIkZhYmlvIGRhIFNpbHZhIFNvdXphXCIsXCJFbWFpbFwiOlwiZHV6YXFAbGljZS5jb21cIixcIlJvbGVcIjpudWxsLFwiSWRcIjo3MDM0OH0iLCJyb2xlIjoiU3RyZWFtZXIiLCJuYmYiOjE3NjEzMzUxMTUsImV4cCI6MTc2MzkyNzExNSwiaWF0IjoxNzYxMzM1MTE1fQ.tvgaBqnyruz046LcMQWrmRgHQFfjcM0StEm8sasSCEk';
@@ -25,6 +32,41 @@ function getRandomName() {
 function generateRandomGVMessage() {
     const randomNumber = Math.floor(10000000 + Math.random() * 90000000); // 8-digit random number
     return `GV${randomNumber}`;
+}
+
+// --- Funções do Encurtador de Links ---
+
+function generateUniqueCode() {
+    // Gera um código único de 8 caracteres usando caracteres alfanuméricos
+    return crypto.randomBytes(4).toString('hex');
+}
+
+async function readPedidos() {
+    try {
+        const data = await fs.readFile(PEDIDOS_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        // Se o arquivo não existir, retorna um objeto vazio
+        if (error.code === 'ENOENT') {
+            return {};
+        }
+        throw error;
+    }
+}
+
+async function savePedido(codigo, pedidoData) {
+    const pedidos = await readPedidos();
+    pedidos[codigo] = {
+        ...pedidoData,
+        createdAt: new Date().toISOString()
+    };
+    await fs.writeFile(PEDIDOS_FILE, JSON.stringify(pedidos, null, 2), 'utf8');
+    return codigo;
+}
+
+async function getPedido(codigo) {
+    const pedidos = await readPedidos();
+    return pedidos[codigo] || null;
 }
 
 // --- Funções Auxiliares (User Agent e Security Headers) ---
@@ -121,6 +163,137 @@ app.get('/', (req, res) => {
 
 app.get('/pix/', (req, res) => {
     res.redirect('/');
+});
+
+// --- Rota para criar encurtador de link de pedido ---
+app.get('/pedido', async (req, res) => {
+    try {
+        const { 
+            items, 
+            order_nsu, 
+            redirect_url,
+            customer_name,
+            customer_email,
+            customer_cellphone,
+            address_cep,
+            address_complement,
+            address_number
+        } = req.query;
+
+        // Validação dos parâmetros obrigatórios
+        if (!items || !order_nsu || !redirect_url) {
+            return res.status(400).json({
+                error: 'Parâmetros obrigatórios faltando',
+                required: ['items', 'order_nsu', 'redirect_url']
+            });
+        }
+
+        // Parse do items (pode vir como string JSON ou já parseado)
+        let itemsParsed;
+        try {
+            itemsParsed = typeof items === 'string' ? JSON.parse(decodeURIComponent(items)) : items;
+        } catch (error) {
+            return res.status(400).json({
+                error: 'Formato inválido para o parâmetro items. Deve ser um JSON válido.'
+            });
+        }
+
+        // Validação do formato dos items
+        if (!Array.isArray(itemsParsed)) {
+            return res.status(400).json({
+                error: 'O parâmetro items deve ser um array'
+            });
+        }
+
+        // Gera código único
+        const codigo = generateUniqueCode();
+
+        // Prepara os dados do pedido (incluindo campos opcionais)
+        const pedidoData = {
+            items: itemsParsed,
+            order_nsu: order_nsu,
+            redirect_url: redirect_url
+        };
+
+        // Adiciona campos opcionais se fornecidos
+        if (customer_name) pedidoData.customer_name = customer_name;
+        if (customer_email) pedidoData.customer_email = customer_email;
+        if (customer_cellphone) pedidoData.customer_cellphone = customer_cellphone;
+        if (address_cep) pedidoData.address_cep = address_cep;
+        if (address_complement) pedidoData.address_complement = address_complement;
+        if (address_number) pedidoData.address_number = address_number;
+
+        // Salva o pedido
+        await savePedido(codigo, pedidoData);
+
+        // Retorna o código e a URL do link encurtado
+        const linkUrl = `${req.protocol}://${req.get('host')}/link/${codigo}`;
+        
+        res.json({
+            success: true,
+            codigo: codigo,
+            link: linkUrl,
+            pedido: pedidoData
+        });
+
+    } catch (error) {
+        console.error('Erro ao processar pedido:', error);
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            message: error.message
+        });
+    }
+});
+
+// --- Rota para acessar o link encurtado e redirecionar ---
+app.get('/link/:codigo', async (req, res) => {
+    try {
+        const { codigo } = req.params;
+
+        // Busca o pedido
+        const pedido = await getPedido(codigo);
+
+        if (!pedido) {
+            return res.status(404).json({
+                error: 'Link não encontrado',
+                message: 'O código fornecido não existe ou foi removido.'
+            });
+        }
+
+        // Constrói a URL de checkout com os parâmetros obrigatórios
+        const itemsEncoded = encodeURIComponent(JSON.stringify(pedido.items));
+        let checkoutUrl = `${CHECKOUT_BASE_URL}?items=${itemsEncoded}&order_nsu=${encodeURIComponent(pedido.order_nsu)}&redirect_url=${encodeURIComponent(pedido.redirect_url)}`;
+
+        // Adiciona campos opcionais se existirem no pedido
+        if (pedido.customer_name) {
+            checkoutUrl += `&customer_name=${encodeURIComponent(pedido.customer_name)}`;
+        }
+        if (pedido.customer_email) {
+            checkoutUrl += `&customer_email=${encodeURIComponent(pedido.customer_email)}`;
+        }
+        if (pedido.customer_cellphone) {
+            checkoutUrl += `&customer_cellphone=${encodeURIComponent(pedido.customer_cellphone)}`;
+        }
+        if (pedido.address_cep) {
+            checkoutUrl += `&address_cep=${encodeURIComponent(pedido.address_cep)}`;
+        }
+        if (pedido.address_complement) {
+            checkoutUrl += `&address_complement=${encodeURIComponent(pedido.address_complement)}`;
+        }
+        if (pedido.address_number) {
+            checkoutUrl += `&address_number=${encodeURIComponent(pedido.address_number)}`;
+        }
+
+        // Redireciona para a URL de checkout
+        res.redirect(checkoutUrl);
+
+    } catch (error) {
+        console.error('Erro ao processar link:', error);
+        res.status(500).json({
+            error: 'Erro interno do servidor',
+            message: error.message
+        });
+    }
 });
 
 app.get('/pix/:valor', async (req, res) => {
