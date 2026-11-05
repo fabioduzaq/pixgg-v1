@@ -9,6 +9,12 @@ const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// --- CORS ---
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    next();
+});
+
 // --- Configurações do Encurtador de Links ---
 const PEDIDOS_FILE = path.join(__dirname, 'pedidos.json');
 const CHECKOUT_BASE_URL = 'https://checkout.infinitepay.io/gvfacil';
