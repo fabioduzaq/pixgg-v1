@@ -296,6 +296,71 @@ app.get('/link/:codigo', async (req, res) => {
     }
 });
 
+// --- Rota para gerar Pix com nome/mensagem e retornar JSON ---
+app.get('/pix/json/:valor/:Name/:Message', async (req, res) => {
+    const valorRaw = req.params.valor.replace(',', '.');
+    const valor = parseFloat(valorRaw);
+    const nome = req.params.Name.trim();
+    const message = req.params.Message.trim();
+
+    if (isNaN(valor) || valor <= 0) {
+        return res.status(400).json({
+            success: false,
+            error: 'Valor inválido. Use formato numérico (ex: 10.90)'
+        });
+    }
+
+    if (!nome || !message) {
+        return res.status(400).json({
+            success: false,
+            error: 'Nome e mensagem são obrigatórios'
+        });
+    }
+
+    console.log(`Gerando Pix de R$ ${valor.toFixed(2)} para ${nome} (JSON)...`);
+
+    try {
+        const result = await generatePixGgCharge({
+            donatorNickname: nome,
+            donatorMessage: message,
+            donatorAmount: valor
+        });
+
+        if (!result.success || !result.data || !result.data.pixUrl) {
+            throw new Error(result.error || 'Falha ao obter código Pix da API');
+        }
+
+        const pixCode = result.data.pixUrl;
+
+        const qrCodeDataURL = await QRCode.toDataURL(pixCode, {
+            width: 300,
+            margin: 2,
+            color: {
+                dark: '#000000',
+                light: '#ffffff'
+            }
+        });
+
+        res.json({
+            success: true,
+            valor: valor,
+            nome: nome,
+            mensagem: message,
+            transactionId: result.data.transactionId,
+            pixUrl: pixCode,
+            qrCodeDataURL: qrCodeDataURL
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            success: false,
+            error: 'Erro ao gerar Pix',
+            message: error.message
+        });
+    }
+});
+
 app.get('/pix/:valor', async (req, res) => {
     // Tratamento do valor (substitui vírgula por ponto se necessário)
     let valorRaw = req.params.valor.replace(',', '.');
